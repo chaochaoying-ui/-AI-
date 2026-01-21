@@ -1,0 +1,8 @@
+{
+  "name": "AI热点爆款文案生成器",
+  "description": "主动式AI产业链观察员——自动化内容生产系统，专注于科技、AI产业链、机器人产业的微信公众号内容创作。",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

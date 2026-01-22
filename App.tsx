@@ -20,7 +20,13 @@ import {
   TrendingUp,
   Target,
   Globe,
-  PieChart
+  PieChart,
+  Rocket,
+  Loader2,
+  TrendingDown,
+  Info,
+  ArrowUpRight,
+  ShieldCheck
 } from 'lucide-react';
 import { GeminiService } from './services/geminiService';
 import { AppStatus, TopicCluster } from './types';
@@ -31,6 +37,7 @@ const App: React.FC = () => {
   const [selectedTopic, setSelectedTopic] = useState<TopicCluster | null>(null);
   const [streamedContent, setStreamedContent] = useState<string>('');
   const [images, setImages] = useState<string[]>([]);
+  const [coverImage, setCoverImage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'sensing' | 'editor'>('sensing');
   const [hasKey, setHasKey] = useState<boolean>(true);
   const articleRef = useRef<HTMLDivElement>(null);
@@ -73,11 +80,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Initial scan is still performed to avoid empty state, but UI emphasizes the manual button.
-  useEffect(() => {
-    handleSense();
-  }, [handleSense]);
-
   const handleGenerate = async (topic: TopicCluster) => {
     if (!hasKey) await handleOpenKeyDialog();
     
@@ -86,6 +88,7 @@ const App: React.FC = () => {
     setActiveTab('editor');
     setStreamedContent('');
     setImages([]);
+    setCoverImage(null);
 
     try {
       const stream = geminiRef.current.generateArticleStream(topic);
@@ -98,15 +101,32 @@ const App: React.FC = () => {
         }
       }
 
-      const anchorsMatch = fullText.match(/\[视觉锚点\d+[：:]\s*(.*?)\]/gi);
-      if (anchorsMatch) {
-        const anchors = anchorsMatch.slice(0, 3).map(a => a.replace(/\[视觉锚点\d+[：:]\s*|\]/gi, '').trim());
-        const tempImages: string[] = [];
-        for (const anchor of anchors) {
-          const img = await geminiRef.current.generateVisual(anchor);
-          if (img) tempImages.push(img);
+      const coverMatch = fullText.match(/\[封面锚点[：:]\s*(.*?)\]/i);
+      if (coverMatch) {
+        const coverDesc = coverMatch[1].trim();
+        const coverImg = await geminiRef.current.generateCover(coverDesc);
+        if (coverImg) setCoverImage(coverImg);
+      }
+
+      const anchorRegex = /\[视觉锚点(\d+)[：:]\s*(.*?)\]/gi;
+      let match;
+      const anchorMap: { [key: number]: string } = {};
+      
+      while ((match = anchorRegex.exec(fullText)) !== null) {
+        const num = parseInt(match[1]);
+        const desc = match[2].trim();
+        anchorMap[num] = desc;
+      }
+
+      const tempImages: string[] = [];
+      for (let i = 1; i <= 3; i++) {
+        if (anchorMap[i]) {
+          const img = await geminiRef.current.generateVisual(anchorMap[i]);
+          if (img) {
+            tempImages[i-1] = img;
+            setImages([...tempImages]); 
+          }
         }
-        setImages(tempImages);
       }
     } catch (e: any) {
       console.error("生成失败", e);
@@ -125,27 +145,20 @@ const App: React.FC = () => {
       allElems.forEach(el => {
         if (el.classList.contains('article-title-blue')) {
           (el as HTMLElement).style.borderLeft = '6px solid #3b82f6';
-          (el as HTMLElement).style.paddingLeft = '15px';
-          (el as HTMLElement).style.fontSize = '22px';
+          (el as HTMLElement).style.paddingLeft = '18px';
+          (el as HTMLElement).style.fontSize = '24px';
           (el as HTMLElement).style.fontWeight = 'bold';
-          (el as HTMLElement).style.margin = '35px 0 20px 0';
-          (el as HTMLElement).style.color = '#3b82f6';
-        }
-        if (el.classList.contains('article-quote-purple')) {
-          (el as HTMLElement).style.padding = '20px';
-          (el as HTMLElement).style.borderLeft = '5px solid #a855f7';
-          (el as HTMLElement).style.background = '#f9fafb';
-          (el as HTMLElement).style.color = '#6b21a8';
-          (el as HTMLElement).style.margin = '25px 0';
-          (el as HTMLElement).style.fontSize = '18px';
-          (el as HTMLElement).style.lineHeight = '1.6';
+          (el as HTMLElement).style.margin = '50px 0 25px 0';
+          (el as HTMLElement).style.color = '#1d4ed8';
+          (el as HTMLElement).style.lineHeight = '1.4';
         }
         if (el.tagName === 'P') {
-          (el as HTMLElement).style.fontSize = '17px';
+          (el as HTMLElement).style.fontSize = '18px';
           (el as HTMLElement).style.lineHeight = '1.8';
-          (el as HTMLElement).style.marginBottom = '20px';
-          (el as HTMLElement).style.color = '#374151';
+          (el as HTMLElement).style.marginBottom = '24px';
+          (el as HTMLElement).style.color = '#1f2937';
           (el as HTMLElement).style.textAlign = 'justify';
+          (el as HTMLElement).style.letterSpacing = '0.01em';
         }
       });
 
@@ -153,7 +166,7 @@ const App: React.FC = () => {
       const blob = new Blob([container.innerHTML], { type });
       const data = [new ClipboardItem({ [type]: blob })];
       await navigator.clipboard.write(data);
-      alert("✨ 商业级内容已复制！请直接在微信公众号后台粘贴。");
+      alert("🚀 商业级排版已准备就绪！\n已复制富文本，请直接在微信公众号后台粘贴。");
     } catch (err) {
       console.error("复制失败", err);
     }
@@ -164,252 +177,366 @@ const App: React.FC = () => {
   };
 
   const renderFormattedContent = (content: string) => {
-    const lines = content.split('\n');
+    const combinedContent = content.replace(/\[TABLE:([\s\S]*?)\]/g, (match) => {
+      return match.replace(/\n/g, ' \\n ');
+    });
+
+    const lines = combinedContent.split('\n');
     let listItems: string[] = [];
+    const filteredLines = lines.filter(l => !l.match(/^\[(视觉锚点|封面锚点)/));
 
-    const filteredLines = lines.filter(l => !l.match(/^\[视觉锚点/));
-
-    return filteredLines.map((line, idx) => {
-      const safeLine = cleanText(line);
-
-      // 蓝色章节标题
-      if (safeLine.match(/^\[TITLE[：:]\s*(.*?)\]/i)) {
-        const text = safeLine.replace(/^\[TITLE[：:]\s*|\]/gi, '');
-        return <section key={idx} className="article-title-blue mt-10 mb-6 font-bold text-2xl text-blue-400 py-1 border-l-[6px] border-blue-500 pl-4">{text}</section>;
-      }
-      // 紫色金句
-      if (safeLine.match(/^\[QUOTE[：:]\s*(.*?)\]/i)) {
-        const text = safeLine.replace(/^\[QUOTE[：:]\s*|\]/gi, '');
-        return <blockquote key={idx} className="article-quote-purple my-8 p-6 rounded-r-2xl border-l-[5px] border-purple-500 bg-purple-500/10 italic text-xl text-indigo-100 font-serif">{text}</blockquote>;
-      }
-      // 绿色高亮框
-      if (safeLine.match(/^\[HIGHLIGHT[：:]\s*(.*?)\]/i)) {
-        const text = safeLine.replace(/^\[HIGHLIGHT[：:]\s*|\]/gi, '');
-        return <div key={idx} className="my-8 p-6 rounded-2xl border border-green-500/30 bg-green-500/5 text-green-300 text-base leading-relaxed">{text}</div>;
-      }
-      // 智能配图
-      const imgMatch = safeLine.match(/^\[IMAGE[：:]\s*(\d+)\]/i);
-      if (imgMatch) {
-        const index = parseInt(imgMatch[1]) - 1;
-        const imgData = images[index];
-        return (
-          <div key={idx} className="my-10">
-            <div className="rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-900 aspect-video relative group">
-              {imgData ? (
-                <img src={imgData} alt={`AI Asset ${index + 1}`} className="w-full h-auto block" />
+    return (
+      <div className="article-container relative space-y-4">
+        {/* 文章顶部封面图 */}
+        {(coverImage || status === AppStatus.GENERATING) && (
+          <div className="mb-20 -mx-6 lg:-mx-12">
+            <div className="rounded-[3.5rem] overflow-hidden border border-white/10 bg-slate-900 relative shadow-[0_50px_100px_-20px_rgba(0,0,0,0.8)]" style={{ aspectRatio: '2.35 / 1' }}>
+              {coverImage ? (
+                <img src={coverImage} alt="Cover" className="w-full h-full object-cover transition-transform duration-1000 hover:scale-105" />
               ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-700">
-                  <ImageIcon className="w-10 h-10 mb-3 animate-pulse" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Assets Rendering</span>
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-md">
+                   <div className="relative mb-6">
+                     <ImageIcon className="w-20 h-20 text-blue-500/20 animate-pulse" />
+                     <Sparkles className="w-8 h-8 text-blue-400 absolute -top-2 -right-2 animate-bounce" />
+                   </div>
+                   <span className="text-xs font-black uppercase tracking-[0.8em] text-blue-400/60 ml-4 animate-pulse">Cinematic Intelligence Cover</span>
                 </div>
               )}
             </div>
           </div>
-        );
-      }
-      // 商业数据对比表
-      if (safeLine.startsWith('[TABLE:')) {
-        const rows = safeLine.replace(/^\[TABLE:\s*|\]/gi, '').split('\\n');
-        return (
-          <div key={idx} className="my-8 overflow-x-auto">
-            <table className="w-full border-collapse rounded-2xl overflow-hidden bg-slate-900 border border-slate-800">
-              <thead className="bg-slate-800">
-                <tr>
-                  {rows[0].split('|').map((h, i) => <th key={i} className="px-5 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">{h.trim()}</th>)}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {rows.slice(1).map((row, i) => (
-                  <tr key={i} className="hover:bg-slate-800/30">
-                    {row.split('|').map((d, j) => <td key={j} className="px-5 py-4 text-sm text-slate-300">{d.trim()}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-      }
-      // 列表
-      if (safeLine.match(/^\[LIST[：:]\s*(.*?)\]/i)) {
-        const text = safeLine.replace(/^\[LIST[：:]\s*|\]/gi, '');
-        listItems.push(text);
-        const nextLine = filteredLines[idx+1];
-        if (!nextLine || !nextLine.match(/^\[LIST[：:]\s*(.*?)\]/i)) {
-          const currentList = [...listItems];
-          listItems = [];
-          return (
-            <div key={idx} className="my-8 space-y-4">
-              {currentList.map((item, i) => (
-                <div key={i} className="flex gap-5 items-start">
-                  <div className="w-7 h-7 rounded-full bg-blue-600 flex-shrink-0 flex items-center justify-center text-xs font-black text-white mt-1 shadow-lg shadow-blue-900/40">{i + 1}</div>
-                  <div className="text-slate-300 text-lg leading-relaxed flex-1">{item}</div>
+        )}
+
+        {filteredLines.map((line, idx) => {
+          const safeLine = cleanText(line);
+
+          // 章节标题：顶级金融杂志粗体大号样式
+          if (safeLine.match(/^\[TITLE[：:]\s*(.*?)\]/i)) {
+            const text = safeLine.replace(/^\[TITLE[：:]\s*|\]/gi, '');
+            return (
+              <section key={idx} className="relative py-12">
+                <div className="visual-guide-line" />
+                <h3 className="text-5xl font-[900] text-white tracking-tighter leading-none mb-4 uppercase">
+                  {text}
+                </h3>
+                <div className="w-24 h-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full" />
+              </section>
+            );
+          }
+          
+          // 深度金句：蓝紫渐变背景，强调权威感
+          if (safeLine.match(/^\[QUOTE[：:]\s*(.*?)\]/i)) {
+            const text = safeLine.replace(/^\[QUOTE[：:]\s*|\]/gi, '');
+            return (
+              <div key={idx} className="my-16 relative">
+                <div className="absolute -left-10 top-0 text-7xl font-serif text-blue-500/20 leading-none">“</div>
+                <blockquote className="p-12 glass-card rounded-r-[4rem] rounded-l-2xl border-l-[10px] border-indigo-600">
+                  <p className="text-3xl font-bold text-indigo-100 italic leading-relaxed tracking-tight">
+                    {text}
+                  </p>
+                </blockquote>
+              </div>
+            );
+          }
+          
+          // 产业真相/高亮框：编辑推荐感，带微光特效
+          if (safeLine.match(/^\[HIGHLIGHT[：:]\s*(.*?)\]/i)) {
+            const text = safeLine.replace(/^\[HIGHLIGHT[：:]\s*|\]/gi, '');
+            return (
+              <div key={idx} className="my-12 group">
+                <div className="gradient-border-box shadow-[0_30px_60px_-15px_rgba(59,130,246,0.1)] transition-all group-hover:shadow-blue-500/5">
+                  <div className="highlight-badge flex gap-2 items-center">
+                    <ShieldCheck className="w-3 h-3" />
+                    Editor's Intelligence Signal
+                  </div>
+                  <p className="text-xl text-blue-100/90 leading-relaxed font-medium">
+                    {text}
+                  </p>
                 </div>
-              ))}
-            </div>
-          );
-        }
-        return null;
-      }
-      
-      if (safeLine.trim() === '') return <div key={idx} className="h-4" />; // 段落间距控制
-      
-      return <p key={idx} className="text-slate-300 mb-6 leading-relaxed text-lg font-light tracking-wide text-justify">{safeLine}</p>;
-    });
+              </div>
+            );
+          }
+
+          // 金融数据表格：职业报告风格，增强对比
+          if (safeLine.includes('[TABLE:')) {
+            const tableContent = safeLine.match(/\[TABLE:(.*?)\]/i)?.[1] || "";
+            const rows = tableContent.split(/\\n|\n/).filter(r => r.trim());
+            if (rows.length === 0) return null;
+
+            return (
+              <div key={idx} className="my-20 overflow-hidden glass-card rounded-[3rem] shadow-2xl border border-white/10">
+                <div className="pro-table-header px-10 py-8 flex justify-between items-center">
+                  <div className="flex items-center gap-4">
+                    <BarChart3 className="w-6 h-6 text-white" />
+                    <span className="text-sm font-black text-white uppercase tracking-[0.4em]">Proprietary Asset Scanner</span>
+                  </div>
+                  <div className="text-[10px] font-black text-white/50 uppercase tracking-widest bg-black/20 px-4 py-2 rounded-full">
+                    A-Share Market Real-time Logic
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-slate-900/80 border-b border-white/5">
+                        {rows[0].split('|').map((h, i) => (
+                          <th key={i} className="px-10 py-7 text-left text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] whitespace-nowrap">
+                            {h.trim()}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {rows.slice(1).map((row, i) => (
+                        <tr key={i} className="hover:bg-blue-600/[0.05] transition-colors group">
+                          {row.split('|').map((d, j) => {
+                            const content = d.trim();
+                            // 识别股票代码并加亮显示
+                            const isTicker = content.match(/\d{6}/);
+                            return (
+                              <td key={j} className={`px-10 py-8 text-base text-slate-300 font-medium leading-relaxed ${isTicker ? 'ticker-font text-white' : ''}`}>
+                                {isTicker ? (
+                                  <span className="flex items-center gap-2">
+                                    <span className="bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded text-xs font-black">{content}</span>
+                                    <ArrowUpRight className="w-3 h-3 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  </span>
+                                ) : (
+                                  content
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-10 py-6 bg-slate-900/30 text-[9px] font-black text-slate-600 uppercase tracking-widest border-t border-white/5 flex items-center gap-3">
+                  <Info className="w-3 h-3" />
+                  Source: Oracle Intelligence Network - Data verified at the edge
+                </div>
+              </div>
+            );
+          }
+
+          // 智能插图：极简宽屏感，带发光投影
+          const imgMatch = safeLine.match(/^\[IMAGE[：:]\s*(\d+)\]/i);
+          if (imgMatch) {
+            const index = parseInt(imgMatch[1]) - 1;
+            const imgData = images[index];
+            return (
+              <div key={idx} className="my-20">
+                <div className="rounded-[4rem] overflow-hidden border border-white/5 bg-slate-950 aspect-video relative group transition-all duration-700 hover:shadow-[0_40px_100px_-20px_rgba(59,130,246,0.2)]">
+                  {imgData ? (
+                    <img src={imgData} alt={`Editorial Asset ${index + 1}`} className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-700" />
+                  ) : (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+                      <div className="relative">
+                        <ImageIcon className="w-16 h-16 text-blue-500/20 animate-pulse" />
+                        <Loader2 className="w-8 h-8 text-blue-400 absolute inset-0 m-auto animate-spin" />
+                      </div>
+                      <span className="mt-4 text-[10px] font-black uppercase tracking-[0.5em] text-blue-500/30">Alpha Visualization {index + 1}</span>
+                    </div>
+                  )}
+                  <div className="absolute bottom-10 left-10 p-4 px-6 glass-card rounded-2xl opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-500">
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest">Fig. {index + 1} // Intelligence Signal</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+          
+          // 操作指南列表：卡片式设计
+          if (safeLine.match(/^\[LIST[：:]\s*(.*?)\]/i)) {
+            const text = safeLine.replace(/^\[LIST[：:]\s*|\]/gi, '');
+            listItems.push(text);
+            const nextLine = filteredLines[idx+1];
+            if (!nextLine || !nextLine.match(/^\[LIST[：:]\s*(.*?)\]/i)) {
+              const currentList = [...listItems];
+              listItems = [];
+              return (
+                <div key={idx} className="my-16 grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {currentList.map((item, i) => (
+                    <div key={i} className="p-10 glass-card rounded-[3rem] relative group hover:bg-blue-600/5 transition-all">
+                      <div className="absolute -top-4 -left-4 w-12 h-12 bg-white text-slate-950 font-black flex items-center justify-center rounded-2xl shadow-xl transform -rotate-12 group-hover:rotate-0 transition-transform">
+                        {i + 1}
+                      </div>
+                      <p className="text-xl text-slate-300 font-light leading-relaxed">
+                        {item}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+            return null;
+          }
+          
+          if (safeLine.trim() === '') return <div key={idx} className="h-12" />;
+          return <p key={idx} className="magazine-p antialiased">{safeLine}</p>;
+        })}
+      </div>
+    );
   };
 
   return (
     <div className="flex h-screen bg-[#020617] text-slate-200 overflow-hidden">
-      <aside className="w-72 border-r border-white/5 flex flex-col p-10 bg-black/40 backdrop-blur-3xl">
-        <div className="flex items-center gap-4 mb-16">
-          <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-[1.25rem] flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.3)]">
-            <Globe className="w-6 h-6 text-white" />
+      <aside className="w-80 border-r border-white/5 flex flex-col p-12 bg-black/40 backdrop-blur-3xl">
+        <div className="flex items-center gap-5 mb-20">
+          <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-3xl flex items-center justify-center shadow-[0_0_40px_rgba(37,99,235,0.3)]">
+            <Rocket className="w-7 h-7 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-black tracking-[0.2em] text-white uppercase leading-none">Oracle</h1>
-            <span className="text-[10px] text-blue-500 font-bold uppercase tracking-widest mt-1.5 block">AI × A-Share</span>
+            <h1 className="text-xl font-black tracking-[0.2em] text-white uppercase leading-none">Oracle</h1>
+            <span className="text-[10px] text-blue-500 font-bold uppercase tracking-[0.3em] mt-2 block opacity-70">Wealth Logic Engine</span>
           </div>
         </div>
 
-        <nav className="flex-1 space-y-6">
-          <button onClick={() => setActiveTab('sensing')} className={`w-full flex items-center gap-5 px-6 py-5 rounded-2xl transition-all duration-500 group ${activeTab === 'sensing' ? 'bg-blue-600 shadow-2xl shadow-blue-900/40 text-white' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
-            <Search className="w-5 h-5" />
-            <span className="font-bold text-base">全球趋势</span>
+        <nav className="flex-1 space-y-8">
+          <button onClick={() => setActiveTab('sensing')} className={`w-full flex items-center gap-6 px-8 py-6 rounded-3xl transition-all duration-500 group ${activeTab === 'sensing' ? 'bg-blue-600 shadow-2xl shadow-blue-900/60 text-white' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
+            <Globe className="w-6 h-6" />
+            <span className="font-black text-lg">全球趋势</span>
           </button>
-          <button onClick={() => setActiveTab('editor')} className={`w-full flex items-center gap-5 px-6 py-5 rounded-2xl transition-all duration-500 group ${activeTab === 'editor' ? 'bg-blue-600 shadow-2xl shadow-blue-900/40 text-white' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
-            <PieChart className="w-5 h-5" />
-            <span className="font-bold text-base">A股深研</span>
+          <button onClick={() => setActiveTab('editor')} className={`w-full flex items-center gap-6 px-8 py-6 rounded-3xl transition-all duration-500 group ${activeTab === 'editor' ? 'bg-blue-600 shadow-2xl shadow-blue-900/60 text-white' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
+            <PieChart className="w-6 h-6" />
+            <span className="font-black text-lg">A股深研</span>
           </button>
         </nav>
 
         {!hasKey && (
-          <button onClick={handleOpenKeyDialog} className="mt-8 flex items-center gap-3 px-6 py-4 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-500/20 transition-all">
-            <Key className="w-4 h-4" />
-            Configure AI Key
+          <button onClick={handleOpenKeyDialog} className="mt-8 flex items-center gap-3 px-8 py-5 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-500/20 transition-all">
+            <Key className="w-5 h-5" />
+            Configure AI Credentials
           </button>
         )}
       </aside>
 
-      <main className="flex-1 overflow-y-auto custom-scrollbar relative">
-        <header className="sticky top-0 z-40 px-16 py-8 bg-[#020617]/90 backdrop-blur-2xl border-b border-white/5 flex justify-between items-center">
-          <div className="flex items-center gap-8">
-            <h2 className="text-2xl font-black tracking-tight">{activeTab === 'sensing' ? '全球动态深度扫描' : '商业级排版实验室'}</h2>
+      <main className="flex-1 overflow-y-auto custom-scrollbar relative bg-[#020617]">
+        <header className="sticky top-0 z-40 px-20 py-10 bg-[#020617]/95 backdrop-blur-3xl border-b border-white/5 flex justify-between items-center">
+          <div className="flex items-center gap-10">
+            <h2 className="text-3xl font-black tracking-tight text-white">{activeTab === 'sensing' ? '全球情报扫描仪' : '商业内容实验室'}</h2>
             {status !== AppStatus.IDLE && (
-              <div className="flex items-center gap-4 px-5 py-2.5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-black uppercase tracking-[0.1em] border border-blue-500/20 shadow-xl">
-                <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                {status === AppStatus.SENSING ? 'Mapping Global Trends' : 'Generating Market Logic'}
+              <div className="flex items-center gap-4 px-6 py-3 rounded-full bg-blue-500/10 text-blue-400 text-xs font-black uppercase tracking-[0.2em] border border-blue-500/20 shadow-2xl">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-ping" />
+                {status === AppStatus.SENSING ? 'SCANNING MARKETS' : 'CRAFTING ALPHA'}
               </div>
             )}
           </div>
           
-          <div className="flex items-center gap-5">
-            <button 
-              onClick={handleSense} 
-              disabled={status !== AppStatus.IDLE}
-              title="手动触发全球动态扫描"
-              className="px-5 py-3 bg-white/5 hover:bg-white/10 rounded-2xl text-slate-300 transition-all border border-white/10 flex items-center gap-3 active:scale-95 disabled:opacity-50"
-            >
-              <RefreshCcw className={`w-5 h-5 ${status === AppStatus.SENSING ? 'animate-spin text-blue-500' : ''}`} />
-              <span className="text-xs font-black uppercase tracking-widest">扫描全球资讯</span>
-            </button>
+          <div className="flex items-center gap-6">
+            {activeTab === 'sensing' && (
+              <button 
+                onClick={handleSense} 
+                disabled={status !== AppStatus.IDLE}
+                className="px-8 py-4 bg-white text-slate-950 hover:bg-blue-50 rounded-[1.5rem] font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center gap-3 shadow-[0_15px_30px_-5px_rgba(255,255,255,0.1)] active:scale-95 disabled:opacity-50"
+              >
+                <RefreshCcw className={`w-5 h-5 ${status === AppStatus.SENSING ? 'animate-spin' : ''}`} />
+                触发手动扫描
+              </button>
+            )}
             {activeTab === 'editor' && streamedContent && (
-              <button onClick={copyRichText} className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-3.5 rounded-2xl text-xs font-black flex items-center gap-3 shadow-2xl shadow-blue-900/60 active:scale-95 transition-all">
-                <Copy className="w-4 h-4" />
-                复制商业排版 (直粘贴后台)
+              <button onClick={copyRichText} className="bg-blue-600 hover:bg-blue-700 text-white px-12 py-4 rounded-[1.5rem] text-xs font-black flex items-center gap-4 shadow-2xl shadow-blue-900/60 active:scale-95 transition-all tracking-[0.2em] uppercase">
+                <Copy className="w-5 h-5" />
+                复制商业级排版
               </button>
             )}
           </div>
         </header>
 
-        <div className="max-w-6xl mx-auto p-16">
+        <div className="max-w-7xl mx-auto px-20 py-16">
           {activeTab === 'sensing' && (
-            <div className="space-y-16">
-              <div className="max-w-3xl">
-                <h3 className="text-6xl font-black text-white tracking-tighter mb-6 leading-none">财富感知协议</h3>
-                <p className="text-slate-400 text-xl leading-relaxed font-light">
-                  接入 Google Search，不仅实时扫描全球热度，更穿透信息迷雾，挖掘 A 股市场的【产业认知差】。
+            <div className="space-y-20">
+              <div className="max-w-4xl">
+                <h3 className="text-7xl font-black text-white tracking-tighter mb-8 leading-[1.1]">全球热点，<br/><span className="text-blue-600">A股布局。</span></h3>
+                <p className="text-slate-400 text-2xl leading-relaxed font-light max-w-2xl">
+                  点击上方按钮，Oracle 将穿越全球噪音，为您挖掘那些能让 A 股产业链产生剧烈共振的【财富认知差】。
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                {topics.length > 0 ? topics.map(topic => (
-                  <div key={topic.id} className="group p-12 rounded-[3.5rem] bg-white/[0.03] border border-white/5 hover:border-blue-500/50 hover:bg-blue-500/[0.03] transition-all duration-700 flex flex-col shadow-2xl">
-                    <div className="mb-8 flex justify-between items-center">
-                      <span className="px-5 py-2 bg-blue-600/20 text-blue-400 text-xs font-black rounded-full tracking-[0.1em] border border-blue-500/30">
-                        VIRAL SCORE: {topic.viralScore}
-                      </span>
-                    </div>
-                    <h4 className="text-3xl font-black mb-8 group-hover:text-blue-400 transition-colors leading-tight">{topic.mainTopic}</h4>
-                    <div className="space-y-4 mb-12 flex-1">
-                      {topic.relatedEvents.map((e, i) => (
-                        <div key={i} className="flex gap-5 items-start text-sm text-slate-500 leading-relaxed font-medium">
-                          <Target className="w-4 h-4 mt-1 text-blue-500 opacity-60" />
-                          {e}
-                        </div>
-                      ))}
-                    </div>
-                    
-                    {topic.sources && (
-                      <div className="mb-10 p-8 bg-black/40 rounded-[2.5rem] border border-white/5">
-                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-4">Intelligence Sources</p>
-                        <div className="flex flex-col gap-3">
-                          {topic.sources.slice(0, 3).map((s, i) => (
-                            <a key={i} href={s.uri} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-400/80 hover:text-blue-300 flex items-center gap-3 truncate transition-colors">
-                              <ExternalLink className="w-3 h-3 flex-shrink-0" /> {s.title}
-                            </a>
-                          ))}
-                        </div>
+              {topics.length > 0 ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                  {topics.map(topic => (
+                    <div key={topic.id} className="group p-14 rounded-[4rem] bg-white/[0.02] border border-white/5 hover:border-blue-500/50 hover:bg-blue-500/[0.03] transition-all duration-700 flex flex-col shadow-2xl relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 blur-[100px] -mr-32 -mt-32 pointer-events-none group-hover:bg-blue-600/10 transition-all" />
+                      <div className="mb-10">
+                        <span className="px-6 py-2.5 bg-blue-600/20 text-blue-400 text-xs font-black rounded-full tracking-[0.2em] border border-blue-500/30">
+                          POTENTIAL: {topic.viralScore}%
+                        </span>
                       </div>
-                    )}
-
-                    <button 
-                      onClick={() => handleGenerate(topic)} 
-                      disabled={status !== AppStatus.IDLE} 
-                      className="w-full py-6 bg-white text-slate-950 font-black text-xs rounded-[2rem] tracking-[0.25em] uppercase hover:bg-blue-50 transition-all flex items-center justify-center gap-4 shadow-2xl active:scale-[0.98]"
-                    >
-                      生成 A 股深研长文 <ChevronRight className="w-5 h-5" />
-                    </button>
-                  </div>
-                )) : (
-                  <div className="col-span-full py-60 text-center flex flex-col items-center gap-10">
-                    <div className="w-20 h-20 border-[6px] border-blue-500/10 border-t-blue-500 rounded-full animate-spin shadow-[0_0_50px_rgba(37,99,235,0.2)]" />
-                    <div className="space-y-4">
-                      <p className="text-3xl font-black text-white tracking-tighter">正在接入全球信源...</p>
-                      <p className="text-slate-500 font-medium text-lg">实时解析全球动态与 A 股市场的深度关联</p>
+                      <h4 className="text-4xl font-black mb-10 group-hover:text-blue-400 transition-colors leading-tight tracking-tight">{topic.mainTopic}</h4>
+                      <div className="space-y-5 mb-14 flex-1">
+                        {topic.relatedEvents.map((e, i) => (
+                          <div key={i} className="flex gap-6 items-start text-base text-slate-500 leading-relaxed font-medium">
+                            <Target className="w-5 h-5 mt-1.5 text-blue-500 opacity-60" />
+                            {e}
+                          </div>
+                        ))}
+                      </div>
+                      {topic.sources && (
+                        <div className="mb-12 p-8 bg-black/40 rounded-[2.5rem] border border-white/5">
+                          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-5">Intelligence Signal Sources</p>
+                          <div className="flex flex-col gap-4">
+                            {topic.sources.slice(0, 3).map((s, i) => (
+                              <a key={i} href={s.uri} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400/80 hover:text-blue-200 flex items-center gap-3 truncate transition-colors group/link">
+                                <ExternalLink className="w-3.5 h-3.5 flex-shrink-0 group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" /> {s.title}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <button 
+                        onClick={() => handleGenerate(topic)} 
+                        disabled={status !== AppStatus.IDLE} 
+                        className="w-full py-7 bg-white text-slate-950 font-black text-sm rounded-[2.5rem] tracking-[0.3em] uppercase hover:bg-blue-50 transition-all flex items-center justify-center gap-5 shadow-2xl active:scale-[0.97]"
+                      >
+                        激活 A 股研报级创作 <ChevronRight className="w-6 h-6" />
+                      </button>
                     </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-40 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-[5rem] bg-white/[0.01]">
+                  <div className="w-32 h-32 bg-slate-900 rounded-[3rem] flex items-center justify-center mb-10 shadow-2xl">
+                    <Zap className="w-14 h-14 text-slate-700" />
                   </div>
-                )}
-              </div>
+                  <h4 className="text-3xl font-black text-slate-500 mb-4">待扫描状态</h4>
+                  <p className="text-slate-600 text-xl font-light">点击右上角“触发手动扫描”以开始</p>
+                </div>
+              )}
             </div>
           )}
 
           {activeTab === 'editor' && (
-            <div className="max-w-4xl mx-auto">
-              <div className="bg-white/[0.02] backdrop-blur-3xl border border-white/5 rounded-[4.5rem] p-16 shadow-[0_80px_160px_-40px_rgba(0,0,0,0.6)] relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-[40rem] h-[40rem] bg-blue-600/5 blur-[150px] -mr-80 -mt-80 pointer-events-none" />
+            <div className="max-w-6xl mx-auto">
+              <div className="bg-white/[0.02] backdrop-blur-3xl border border-white/5 rounded-[6rem] p-12 lg:p-24 shadow-[0_100px_200px_-50px_rgba(0,0,0,0.7)] relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-[50rem] h-[50rem] bg-blue-600/5 blur-[200px] -mr-80 -mt-80 pointer-events-none" />
                 
                 {!streamedContent && status === AppStatus.IDLE ? (
-                  <div className="py-72 text-center flex flex-col items-center">
-                    <div className="w-28 h-28 bg-slate-900/50 rounded-[3rem] flex items-center justify-center mb-12 border border-white/5 shadow-2xl">
-                      <PenTool className="w-12 h-12 text-slate-700" />
+                  <div className="py-80 text-center flex flex-col items-center">
+                    <div className="w-32 h-32 bg-slate-900/50 rounded-[4rem] flex items-center justify-center mb-14 border border-white/5 shadow-inner">
+                      <PenTool className="w-16 h-16 text-slate-800" />
                     </div>
-                    <h3 className="text-3xl font-black mb-6">深度排版实验室已就绪</h3>
-                    <p className="text-slate-500 max-w-sm text-lg leading-relaxed font-light">选择一个选题，Oracle 将为您生成极具穿透力的商业深度解析，并精准定位 A 股核心标的。</p>
+                    <h3 className="text-4xl font-black mb-8 text-white">商业深研实验室已就绪</h3>
+                    <p className="text-slate-500 max-w-md text-xl leading-relaxed font-light">选择一个高爆发力的选题，Oracle 将为您全自动生成具备顶级商业逻辑与 A 股穿透力的深度长文。</p>
                   </div>
                 ) : (
-                  <div ref={articleRef} className="article-container select-text space-y-0 text-slate-300 pb-20">
+                  <div ref={articleRef} className="article-container select-text space-y-0 text-slate-300 pb-24">
                     {renderFormattedContent(streamedContent)}
                   </div>
                 )}
 
                 {status === AppStatus.GENERATING && (
-                  <div className="py-40 flex flex-col items-center gap-10 border-t border-white/5 mt-16">
+                  <div className="py-48 flex flex-col items-center gap-12 border-t border-white/5 mt-20">
                     <div className="relative">
-                      <div className="w-24 h-24 border-[6px] border-blue-500/10 border-t-blue-500 rounded-full animate-spin" />
-                      <Sparkles className="w-8 h-8 text-blue-400 absolute inset-0 m-auto animate-pulse" />
+                      <div className="w-28 h-28 border-[8px] border-blue-500/10 border-t-blue-500 rounded-full animate-spin shadow-[0_0_60px_rgba(37,99,235,0.2)]" />
+                      <Sparkles className="w-10 h-10 text-blue-400 absolute inset-0 m-auto animate-pulse" />
                     </div>
-                    <div className="text-center space-y-3">
-                      <p className="text-2xl font-black text-white tracking-tighter">逻辑架构注入中...</p>
-                      <p className="text-slate-500 text-base font-medium">正在梳理 A 股产业链逻辑与核心上市标的</p>
+                    <div className="text-center space-y-5">
+                      <p className="text-3xl font-black text-white tracking-tighter uppercase">财富逻辑注入中</p>
+                      <div className="flex items-center gap-2 justify-center">
+                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-bounce" />
+                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-bounce delay-100" />
+                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-bounce delay-200" />
+                      </div>
+                      <p className="text-slate-500 text-lg font-medium opacity-60">正在对齐全球热度与国内 A 股产业链核心标的</p>
                     </div>
                   </div>
                 )}

@@ -11,7 +11,7 @@ export class GeminiService {
     const ai = this.getAI();
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "请深度扫描全球过去72小时内最火热的AI、机器人及硬科技动态。识别出3个具有【财富效应】的话题。要求：选题具备全球热度，但必须能够直接映射到【中国A股市场】。在 mainTopic 中体现出全球热点与A股财富机会的结合点。返回JSON。",
+      contents: "深度扫描全球过去72小时AI与科技动态。识别3个具有极强财富效应的话题。要求：全球视野，A股落脚。在 mainTopic 中结合热点与A股机会。返回JSON。",
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
@@ -63,39 +63,45 @@ export class GeminiService {
     const ai = this.getAI();
     const prompt = `你是一个深谙人性的微信公众号主编，定位「AI × 认知升级 × 财富复利」。
     
-    请针对以下选题撰写深度商业长文：${topic.mainTopic}。
-    
-    【核心要求】：
-    1. 【全球热度+A股落脚】：从全球最前沿的AI动态切入，但必须将文章重心落脚于【中国A股市场】的产业逻辑。
-    2. 【产业深度分析】：详细分析中国产业链的上下游机会，解释这一全球热点如何驱动国内相关产业。
-    3. 【上市公司点名】：在文章中明确列举并分析深度参与其中的【A股上市企业】。
-    4. 【禁止 Markdown】：严禁使用 **加粗** 或 # 标题。所有样式必须通过 [TAG: 内容] 实现。
-    5. 【商业化排版】：段落之间要有合理的间隙，不要过于拥挤，文字要有呼吸感。
+    选题主题：${topic.mainTopic}。
+    相关事件：${topic.relatedEvents.join(", ")}。
 
-    【排版标签系统】（前端自动解析）：
-    - [TITLE: 章节名] 用于蓝色边框章节标题。
-    - [QUOTE: 金句内容] 用于输出具有洞察力的、甚至带点刻薄真相的金句。
-    - [HIGHLIGHT: 专家视角] 用于强调底层的财富逻辑或产业真相。
-    - [TABLE: 标题1|标题2 \n 数据1|数据2] 用于呈现 A 股相关标的对比或产业链上下游企业。
-    - [LIST: 要点内容] 用于输出操作方法论或核心结论。
-    - [IMAGE: 1/2/3] 插入。
+    【标题生成要求】：
+    请输出 5 个候选爆款标题，必须精准套用提供的爆款公式（恐惧唤醒、贪婪触发等）。
 
-    视觉锚点在文末提供：[视觉锚点N: 构图描述]。
+    【核心内容逻辑】：
+    1. 【全球视角】：拆解全球最火的 AI 趋势。
+    2. 【A股映射】：深度分析该热点如何传导至【中国 A 股市场】的特定板块。
+    3. 【产业拆解】：梳理国内算力、应用层或核心硬件的上下游逻辑。
+    4. 【核心标的】：必须使用表格展示 3-5 家【A股上市公司】。
+       表格格式要求：
+       [TABLE: 核心资产 | 核心优势与护城河 | 潜在风险 | 估值评级 \n 企业A(代码) | 优势描述... | 风险描述... | 评级 \n 企业B(代码) | 优势描述... | 风险描述... | 评级]
+    5. 【认知复利】：总结财富操作建议。
 
-    文章结构建议：
-    - 爆款钩子（戳破认知的表象）
-    - 全球热潮背后的真相（全球动态拆解）
-    - A股产业底层逻辑（国内产业链深度映射）
-    - 核心标的深度扫描（点名具体的A股上市公司及其参与深度）
-    - 普通人的财富复利路径（认知升级与操作建议）
+    【视觉配图与排版协议】：
+    - 严禁任何 Markdown 格式。
+    - 在正文中合适的位置插入 [IMAGE: N] 标签（N 为 1-3）。
+    - 【重要】：在全文最末尾，必须输出以下锚点：
+      [封面锚点: 描述一张极具冲击力的 2.35:1 宽银幕视觉封面]
+      [视觉锚点1: 详细描述]
+      [视觉锚点2: 详细描述]
+      [视觉锚点3: 详细描述]
 
-    字数：3000字左右。文章要有极强的专业深度和商业博弈感。`;
+    【标签系统】：
+    - [TITLE: 章节名] 
+    - [QUOTE: 金句] 
+    - [HIGHLIGHT: 产业真相]
+    - [LIST: 操作指南]
+    - [TABLE: 核心资产 | 核心优势与护城河 | 潜在风险 | 估值评级 \n ...]
+    - [IMAGE: N]
+
+    字数要求：3000字以上，深度剖析。`;
 
     const result = await ai.models.generateContentStream({
       model: 'gemini-3-pro-preview',
       contents: prompt,
       config: {
-        thinkingConfig: { thinkingBudget: 4000 }
+        thinkingConfig: { thinkingBudget: 12000 }
       }
     });
 
@@ -106,25 +112,40 @@ export class GeminiService {
     }
   }
 
-  async generateVisual(prompt: string): Promise<string | null> {
+  async generateCover(prompt: string): Promise<string | null> {
     const ai = this.getAI();
+    const enhancedPrompt = `Ultra-wide cinematic 2.35:1 aspect ratio composition, premium financial magazine cover art, high-end business photography style, futuristic AI tech integration with Chinese stock market symbols, corporate blue and gold lighting, professional 8k render, hyper-detailed, sleek and minimal: ${prompt}`;
+    
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-image-preview',
       contents: {
-        parts: [{ text: `Professional stock market and AI technology editorial illustration, high-end financial business magazine style, cinematic lighting, 4k: ${prompt}` }]
+        parts: [{ text: enhancedPrompt }]
       },
       config: {
-        imageConfig: { 
-          aspectRatio: "16:9",
-          imageSize: "1K" 
-        }
+        imageConfig: { aspectRatio: "16:9", imageSize: "1K" }
       }
     });
-
     for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+      if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+    }
+    return null;
+  }
+
+  async generateVisual(prompt: string): Promise<string | null> {
+    const ai = this.getAI();
+    const enhancedPrompt = `High-end financial editorial illustration, professional 3D minimalist render, corporate blue and gold color palette, cinematic lighting, crisp 8k details, sophisticated corporate aesthetic: ${prompt}`;
+    
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-image-preview',
+      contents: {
+        parts: [{ text: enhancedPrompt }]
+      },
+      config: {
+        imageConfig: { aspectRatio: "16:9", imageSize: "1K" }
       }
+    });
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
     }
     return null;
   }
